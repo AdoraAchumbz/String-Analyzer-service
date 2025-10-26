@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --runInBand",
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
   },
   "keywords": [],
   "author": "",
@@ -20,12 +22,8 @@
     "nodemon": "^3.1.10",
     "supertest": "^7.1.4"
   },
-  "scripts": {
-  "start": "node src/index.js",
-  "dev": "nodemon src/index.js",
-  "test": "jest --runInBand"
-},
-"engines": {
-  "node": "18.x"
-},
+  "engines": {
+    "node": "18.x"
+  }
 }
+
