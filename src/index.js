@@ -1,25 +1,18 @@
-const express = require('express');
-const morgan = require('morgan');
-const helmet = require('helmet');
+// utils/db.js
+const fs = require('fs');
+const path = require('path');
 
-const stringsRouter = require('./routes/strings');
+const dbFile = path.join(__dirname, '../data.json');
 
-const app = express();
+// Create the file if it doesn't exist
+if (!fs.existsSync(dbFile)) fs.writeFileSync(dbFile, JSON.stringify([]));
 
-app.use(helmet());
-app.use(express.json({ limit: '1mb' }));
-app.use(morgan('dev'));
+function readDB() {
+  return JSON.parse(fs.readFileSync(dbFile, 'utf-8'));
+}
 
-app.use('/strings', stringsRouter);
+function writeDB(data) {
+  fs.writeFileSync(dbFile, JSON.stringify(data, null, 2));
+}
 
-app.get('/', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-
-app.use((err, req, res, next) => {
-  console.error('Unexpected error', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-const port = process.env.PORT || 3000;
-const server = app.listen(port, () => console.log(`String Analyzer running on port ${port}`));
-
-module.exports = { app, server };
+module.exports = { readDB, writeDB };

@@ -1,156 +1,70 @@
 const express = require('express');
+const crypto = require('crypto');
+const { readDB, writeDB } = require('../utils/db');
+
 const router = express.Router();
-const db = require('../db');
-const { analyze, sha256 } = require('../utils/analyzer');
-const { parseNaturalLanguage } = require('../utils/nlparser');
 
-function rowToResponse(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    value: row.value,
-    properties: {
-      length: row.length,
-      is_palindrome: !!row.is_palindrome,
-      unique_characters: row.unique_characters,
-      word_count: row.word_count,
-      sha256_hash: row.sha256_hash,
-      character_frequency_map: JSON.parse(row.character_frequency_map)
-    },
-    created_at: row.created_at
-  };
-}
-
+// POST /strings
 router.post('/', (req, res) => {
-  const { value } = req.body || {};
-  if (value === undefined) return res.status(400).json({ error: 'Missing "value" field' });
+  const { value } = req.body;
+  if (!value) return res.status(400).json({ error: 'Missing "value" field' });
   if (typeof value !== 'string') return res.status(422).json({ error: '"value" must be a string' });
 
-  const properties = analyze(value);
-  const id = properties.sha256_hash;
+  const db = readDB();
+  if (db.find(s => s.value === value)) return res.status(409).json({ error: 'String already exists' });
 
-  const exists = db.getById(id) || db.getByValue(value);
-  if (exists) return res.status(409).json({ error: 'String already exists in the system' });
+  const length = value.length;
+  const is_palindrome = value.toLowerCase() === value.toLowerCase().split('').reverse().join('');
+  const unique_characters = new Set(value).size;
+  const word_count = value.trim().split(/\s+/).length;
+  const sha256_hash = crypto.createHash('sha256').update(value).digest('hex');
 
-  const record = {
-    id,
+  const character_frequency_map = {};
+  for (const c of value) character_frequency_map[c] = (character_frequency_map[c] || 0) + 1;
+
+  const newString = {
+    id: sha256_hash,
     value,
-    length: properties.length,
-    is_palindrome: properties.is_palindrome ? 1 : 0,
-    unique_characters: properties.unique_characters,
-    word_count: properties.word_count,
-    sha256_hash: properties.sha256_hash,
-    character_frequency_map: JSON.stringify(properties.character_frequency_map),
+    properties: { length, is_palindrome, unique_characters, word_count, sha256_hash, character_frequency_map },
     created_at: new Date().toISOString()
   };
 
-  db.insert(record);
-  return res.status(201).json(rowToResponse(record));
+  db.push(newString);
+  writeDB(db);
+
+  res.status(201).json(newString);
 });
 
-router.get('/:string_value', (req, res) => {
-  const raw = req.params.string_value;
-  const value = decodeURIComponent(raw);
-  const row = db.getByValue(value);
-  if (!row) return res.status(404).json({ error: 'String not found' });
-  return res.status(200).json(rowToResponse(row));
-});
-
+// GET /strings
 router.get('/', (req, res) => {
-  try {
-    const { is_palindrome, min_length, max_length, word_count, contains_character } = req.query;
-    let rows = db.all();
+  let db = readDB();
+  const { is_palindrome, min_length, max_length, word_count, contains_character } = req.query;
 
-    if (is_palindrome !== undefined) {
-      if (is_palindrome !== 'true' && is_palindrome !== 'false') {
-        return res.status(400).json({ error: 'is_palindrome must be true or false' });
-      }
-      const wanted = is_palindrome === 'true';
-      rows = rows.filter(r => !!r.is_palindrome === wanted);
-    }
-    if (min_length !== undefined) {
-      const n = parseInt(min_length, 10);
-      if (Number.isNaN(n)) return res.status(400).json({ error: 'min_length must be an integer' });
-      rows = rows.filter(r => r.length >= n);
-    }
-    if (max_length !== undefined) {
-      const n = parseInt(max_length, 10);
-      if (Number.isNaN(n)) return res.status(400).json({ error: 'max_length must be an integer' });
-      rows = rows.filter(r => r.length <= n);
-    }
-    if (word_count !== undefined) {
-      const n = parseInt(word_count, 10);
-      if (Number.isNaN(n)) return res.status(400).json({ error: 'word_count must be an integer' });
-      rows = rows.filter(r => r.word_count === n);
-    }
-    if (contains_character !== undefined) {
-      if (typeof contains_character !== 'string' || contains_character.length !== 1) {
-        return res.status(400).json({ error: 'contains_character must be a single character' });
-      }
-      const ch = contains_character;
-      rows = rows.filter(r => {
-        const freq = JSON.parse(r.character_frequency_map);
-        return Object.prototype.hasOwnProperty.call(freq, ch);
-      });
-    }
+  if (is_palindrome !== undefined) db = db.filter(s => s.properties.is_palindrome === (is_palindrome === 'true'));
+  if (min_length) db = db.filter(s => s.properties.length >= parseInt(min_length));
+  if (max_length) db = db.filter(s => s.properties.length <= parseInt(max_length));
+  if (word_count) db = db.filter(s => s.properties.word_count === parseInt(word_count));
+  if (contains_character) db = db.filter(s => s.value.includes(contains_character));
 
-    const out = rows.map(rowToResponse);
-    return res.status(200).json({
-      data: out,
-      count: out.length,
-      filters_applied: {
-        is_palindrome: is_palindrome === undefined ? undefined : (is_palindrome === 'true'),
-        min_length: min_length === undefined ? undefined : parseInt(min_length, 10),
-        max_length: max_length === undefined ? undefined : parseInt(max_length, 10),
-        word_count: word_count === undefined ? undefined : parseInt(word_count, 10),
-        contains_character: contains_character === undefined ? undefined : contains_character
-      }
-    });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
+  res.json({ data: db, count: db.length, filters_applied: req.query });
 });
 
-router.get('/filter-by-natural-language', (req, res) => {
-  const { query } = req.query;
-  if (!query) return res.status(400).json({ error: 'Missing query parameter' });
-  let parsed;
-  try {
-    parsed = parseNaturalLanguage(decodeURIComponent(query));
-  } catch (err) {
-    return res.status(err.code || 400).json({ error: err.message });
-  }
-
-  const filters = parsed.parsed_filters;
-  let rows = db.all();
-
-  if (filters.is_palindrome !== undefined) rows = rows.filter(r => !!r.is_palindrome === !!filters.is_palindrome);
-  if (filters.min_length !== undefined) rows = rows.filter(r => r.length >= filters.min_length);
-  if (filters.max_length !== undefined) rows = rows.filter(r => r.length <= filters.max_length);
-  if (filters.word_count !== undefined) rows = rows.filter(r => r.word_count === filters.word_count);
-  if (filters.contains_character !== undefined) {
-    const ch = filters.contains_character;
-    rows = rows.filter(r => {
-      const freq = JSON.parse(r.character_frequency_map);
-      return Object.prototype.hasOwnProperty.call(freq, ch);
-    });
-  }
-
-  const out = rows.map(rowToResponse);
-  return res.status(200).json({
-    data: out,
-    count: out.length,
-    interpreted_query: parsed
-  });
+// GET /strings/:value
+router.get('/:value', (req, res) => {
+  const db = readDB();
+  const s = db.find(s => s.value === req.params.value);
+  if (!s) return res.status(404).json({ error: 'Not found' });
+  res.json(s);
 });
 
-router.delete('/:string_value', (req, res) => {
-  const value = decodeURIComponent(req.params.string_value);
-  const row = db.getByValue(value);
-  if (!row) return res.status(404).json({ error: 'String not found' });
-  db.deleteById(row.id);
-  return res.status(204).send();
+// DELETE /strings/:value
+router.delete('/:value', (req, res) => {
+  let db = readDB();
+  const lengthBefore = db.length;
+  db = db.filter(s => s.value !== req.params.value);
+  if (db.length === lengthBefore) return res.status(404).json({ error: 'Not found' });
+  writeDB(db);
+  res.status(204).send();
 });
 
 module.exports = router;
