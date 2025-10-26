@@ -1,6 +1,7 @@
+// src/routes/strings.js
 const express = require('express');
 const crypto = require('crypto');
-const { readDB, writeDB } = require('../utils/db');
+const { readDB, writeDB } = require('../../utils/db');
 
 const router = express.Router();
 

@@ -1,48 +1,28 @@
-const Database = require('better-sqlite3');
+// utils/db.js
+const fs = require('fs');
 const path = require('path');
 
-const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'data.sqlite');
-const db = new Database(dbPath);
+// Use process.cwd() so Railway can read/write the file in the root directory
+const dbFile = path.join(process.cwd(), 'data.json');
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS strings (
-  id TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  length INTEGER NOT NULL,
-  is_palindrome INTEGER NOT NULL,
-  unique_characters INTEGER NOT NULL,
-  word_count INTEGER NOT NULL,
-  sha256_hash TEXT NOT NULL,
-  character_frequency_map TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-`);
+// Create file if it doesn't exist
+if (!fs.existsSync(dbFile)) fs.writeFileSync(dbFile, JSON.stringify([]));
 
-const insertStmt = db.prepare(`
-INSERT INTO strings (id, value, length, is_palindrome, unique_characters, word_count, sha256_hash, character_frequency_map, created_at)
-VALUES (@id, @value, @length, @is_palindrome, @unique_characters, @word_count, @sha256_hash, @character_frequency_map, @created_at)
-`);
-
-const getByIdStmt = db.prepare(`SELECT * FROM strings WHERE id = ?`);
-const getByValueStmt = db.prepare(`SELECT * FROM strings WHERE value = ?`);
-const deleteByIdStmt = db.prepare(`DELETE FROM strings WHERE id = ?`);
-const allStmt = db.prepare(`SELECT * FROM strings`);
-
-module.exports = {
-  insert(obj) {
-    insertStmt.run(obj);
-    return obj;
-  },
-  getById(id) {
-    return getByIdStmt.get(id);
-  },
-  getByValue(value) {
-    return getByValueStmt.get(value);
-  },
-  deleteById(id) {
-    return deleteByIdStmt.run(id);
-  },
-  all() {
-    return allStmt.all();
+function readDB() {
+  try {
+    return JSON.parse(fs.readFileSync(dbFile, 'utf-8'));
+  } catch (err) {
+    console.error('Error reading DB', err);
+    return [];
   }
-};
+}
+
+function writeDB(data) {
+  try {
+    fs.writeFileSync(dbFile, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('Error writing DB', err);
+  }
+}
+
+module.exports = { readDB, writeDB };
